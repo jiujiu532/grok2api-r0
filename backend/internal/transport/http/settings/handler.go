@@ -6,18 +6,25 @@ import (
 	"strings"
 	"time"
 
+	clearanceapp "github.com/chenyme/grok2api/backend/internal/application/clearance"
 	settingsapp "github.com/chenyme/grok2api/backend/internal/application/settings"
 	"github.com/chenyme/grok2api/backend/internal/shared/response"
 	"github.com/gin-gonic/gin"
 )
 
-type Handler struct{ service *settingsapp.Service }
+type Handler struct {
+	service   *settingsapp.Service
+	clearance *clearanceapp.Service
+}
 
-func NewHandler(service *settingsapp.Service) *Handler { return &Handler{service: service} }
+func NewHandler(service *settingsapp.Service, clearance *clearanceapp.Service) *Handler {
+	return &Handler{service: service, clearance: clearance}
+}
 
 func (h *Handler) Register(router *gin.RouterGroup) {
 	router.GET("/settings", h.get)
 	router.PUT("/settings", h.update)
+	router.POST("/settings/clearance/refresh", h.refreshClearance)
 }
 
 type settingsConfigDTO struct {
@@ -31,6 +38,19 @@ type settingsConfigDTO struct {
 	Routing           routingConfigDTO           `json:"routing"`
 	Audit             auditConfigDTO             `json:"audit"`
 	ClientKeyDefaults clientKeyDefaultsConfigDTO `json:"clientKeyDefaults"`
+	Clearance         clearanceConfigDTO         `json:"clearance"`
+}
+
+type clearanceConfigDTO struct {
+	Mode                string `json:"mode"`
+	CFCookies           string `json:"cfCookies,omitempty"`
+	CFCookiesConfigured bool   `json:"cfCookiesConfigured"`
+	UserAgent           string `json:"userAgent"`
+	FlareSolverrURL     string `json:"flareSolverrURL"`
+	Timeout             string `json:"timeout"`
+	RefreshInterval     string `json:"refreshInterval"`
+	ClientHintsEnabled  bool   `json:"clientHintsEnabled"`
+	AntiBotCooldown     string `json:"antiBotCooldown"`
 }
 
 type serverConfigDTO struct {
@@ -128,6 +148,19 @@ func (h *Handler) get(c *gin.Context) {
 	response.Success(c, http.StatusOK, newSettingsResponse(h.service.Get()))
 }
 
+func (h *Handler) refreshClearance(c *gin.Context) {
+	if h.clearance == nil {
+		response.Error(c, http.StatusServiceUnavailable, "clearanceUnavailable", "clearance 服务不可用")
+		return
+	}
+	result, err := h.clearance.RefreshAll(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "clearanceRefreshFailed", err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, result)
+}
+
 func (h *Handler) update(c *gin.Context) {
 	var request updateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -193,6 +226,12 @@ func (value settingsConfigDTO) toApplication() settingsapp.EditableConfig {
 		ClientKeyDefaults: settingsapp.ClientKeyDefaultsConfig{
 			RPMLimit: value.ClientKeyDefaults.RPMLimit, MaxConcurrent: value.ClientKeyDefaults.MaxConcurrent,
 		},
+		Clearance: settingsapp.ClearanceConfig{
+			Mode: value.Clearance.Mode, CFCookies: value.Clearance.CFCookies, CFCookiesConfigured: value.Clearance.CFCookiesConfigured,
+			UserAgent: value.Clearance.UserAgent, FlareSolverrURL: value.Clearance.FlareSolverrURL,
+			Timeout: value.Clearance.Timeout, RefreshInterval: value.Clearance.RefreshInterval,
+			ClientHintsEnabled: value.Clearance.ClientHintsEnabled, AntiBotCooldown: value.Clearance.AntiBotCooldown,
+		},
 	}
 }
 
@@ -240,6 +279,12 @@ func newSettingsResponse(value settingsapp.Snapshot) settingsResponse {
 			},
 			ClientKeyDefaults: clientKeyDefaultsConfigDTO{
 				RPMLimit: config.ClientKeyDefaults.RPMLimit, MaxConcurrent: config.ClientKeyDefaults.MaxConcurrent,
+			},
+			Clearance: clearanceConfigDTO{
+				Mode: config.Clearance.Mode, CFCookiesConfigured: config.Clearance.CFCookiesConfigured,
+				UserAgent: config.Clearance.UserAgent, FlareSolverrURL: config.Clearance.FlareSolverrURL,
+				Timeout: config.Clearance.Timeout, RefreshInterval: config.Clearance.RefreshInterval,
+				ClientHintsEnabled: config.Clearance.ClientHintsEnabled, AntiBotCooldown: config.Clearance.AntiBotCooldown,
 			},
 		},
 		RecommendedProviderBuild: providerBuildRecommendationDTO{

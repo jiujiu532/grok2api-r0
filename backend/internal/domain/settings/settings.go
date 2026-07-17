@@ -14,6 +14,19 @@ type Config struct {
 	Routing           RoutingConfig
 	Audit             AuditConfig
 	ClientKeyDefaults ClientKeyDefaultsConfig
+	Clearance         ClearanceConfig
+}
+
+// ClearanceConfig 定义 Cloudflare clearance 与浏览器伪装策略。
+type ClearanceConfig struct {
+	Mode               string
+	CFCookies          string
+	UserAgent          string
+	FlareSolverrURL    string
+	Timeout            time.Duration
+	RefreshInterval    time.Duration
+	ClientHintsEnabled bool
+	AntiBotCooldown    time.Duration
 }
 
 // ServerConfig 定义可热更新的推理入口容量参数。

@@ -17,6 +17,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
 	mediaapp "github.com/chenyme/grok2api/backend/internal/application/media"
 	modelapp "github.com/chenyme/grok2api/backend/internal/application/model"
+	clearanceapp "github.com/chenyme/grok2api/backend/internal/application/clearance"
 	settingsapp "github.com/chenyme/grok2api/backend/internal/application/settings"
 	updatecheckapp "github.com/chenyme/grok2api/backend/internal/application/updatecheck"
 	accounthttp "github.com/chenyme/grok2api/backend/internal/transport/http/account"
@@ -61,6 +62,7 @@ type Dependencies struct {
 	Settings     *settingsapp.Service
 	Egress       *egressapp.Service
 	Updates      *updatecheckapp.Service
+	Clearance    *clearanceapp.Service
 }
 
 type ReadinessComponent struct {
@@ -147,7 +149,7 @@ func New(deps Dependencies) *gin.Engine {
 	audithttp.NewHandler(deps.Audits).Register(adminProtected)
 	dashboardhttp.NewHandler(deps.Dashboard).Register(adminProtected)
 	mediaHandler.RegisterAdmin(adminProtected)
-	settingshttp.NewHandler(deps.Settings).Register(adminProtected)
+	settingshttp.NewHandler(deps.Settings, deps.Clearance).Register(adminProtected)
 	egresshttp.NewHandler(deps.Egress).Register(adminProtected)
 	systemhttp.NewHandler(func() string {
 		if deps.Settings != nil {

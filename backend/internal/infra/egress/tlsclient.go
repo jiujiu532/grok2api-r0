@@ -9,7 +9,6 @@ import (
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
-	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/bogdanfinn/websocket"
 )
 
@@ -43,10 +42,10 @@ func fhttpResponseAsHTTP(response *fhttp.Response) *http.Response {
 	return &http.Response{StatusCode: response.StatusCode, Header: http.Header(response.Header), Body: response.Body}
 }
 
-func newBrowserClient(proxyURL string) (*browserClient, error) {
+func newBrowserClient(proxyURL, userAgent string) (*browserClient, error) {
 	options := []tlsclient.HttpClientOption{
 		tlsclient.WithTimeoutSeconds(7200),
-		tlsclient.WithClientProfile(profiles.Chrome_146),
+		tlsclient.WithClientProfile(ClientProfileFromUserAgent(userAgent)),
 		tlsclient.WithNotFollowRedirects(),
 	}
 	if proxyURL != "" {

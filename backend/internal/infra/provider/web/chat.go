@@ -170,7 +170,10 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		previous = currentPrevious
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				// 先冷却当前出口并销毁连接，再尝试换节点 / 刷新 Statsig。
+				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+				if attempt == 0 {
+					a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
 					a.releaseStatsigRetry(upstream, lease)
 					continue
 				}
@@ -191,7 +194,8 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				body := a.streamOpenAIResponse(ctx, prepared, lease, request.Credential, responseID, input.Model, request.Operation, normalized.Prompt, previous, tools, parallelTools, conversationOptions)
 				return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: streamHeaders(), Body: body}, nil
 			}
-			if errors.Is(preflightErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+			if errors.Is(preflightErr, errWebAntiBot) && attempt == 0 {
+				a.feedbackAntiBot(ctx, lease, statsigTarget)
 				a.releaseStatsigRetry(upstream, lease)
 				continue
 			}
@@ -206,7 +210,8 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 
 		currentParsed, consumeErr := consumeUpstream(upstream.Body, nil)
 		_ = upstream.Body.Close()
-		if errors.Is(consumeErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+		if errors.Is(consumeErr, errWebAntiBot) && attempt == 0 {
+			a.feedbackAntiBot(ctx, lease, statsigTarget)
 			lease.Release()
 			continue
 		}

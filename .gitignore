@@ -14,7 +14,8 @@ Thumbs.db
 /config.yaml
 /config.local.yaml
 /config.*.local.yaml
-/docs/*
+/docs/rules/
+/docs/project/
 /backend/docs/goal/
 *.har
 *.pcap
@@ -29,6 +30,7 @@ Thumbs.db
 /.gocache/
 /.gocache-*/
 /backend/grok2api
+/backend/grok2api.exe
 /backend/coverage.out
 *.coverprofile
 *.test
@@ -44,3 +46,7 @@ Thumbs.db
 /release/
 /.tmp/
 /tmp/
+
+# Local agent / research only
+/.omo/
+/参考/

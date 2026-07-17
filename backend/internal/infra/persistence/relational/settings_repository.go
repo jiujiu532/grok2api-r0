@@ -16,8 +16,9 @@ import (
 const runtimeSettingsKey = "gateway"
 
 type runtimeSettingsPayload struct {
-	Config                      settingsdomain.Config `json:"config"`
-	EncryptedStatsigManualValue string                `json:"encryptedStatsigManualValue,omitempty"`
+	Config                         settingsdomain.Config `json:"config"`
+	EncryptedStatsigManualValue    string                `json:"encryptedStatsigManualValue,omitempty"`
+	EncryptedClearanceCFCookies    string                `json:"encryptedClearanceCfCookies,omitempty"`
 }
 
 type RuntimeSettingsRepository struct {
@@ -47,6 +48,11 @@ func (r *RuntimeSettingsRepository) Get(ctx context.Context) (settingsdomain.Con
 		return settingsdomain.Config{}, time.Time{}, 0, false, fmt.Errorf("解密 Statsig 手动值: %w", err)
 	}
 	payload.Config.ProviderWeb.StatsigManualValue = manualValue
+	cookies, err := r.cipher.Decrypt(payload.EncryptedClearanceCFCookies)
+	if err != nil {
+		return settingsdomain.Config{}, time.Time{}, 0, false, fmt.Errorf("解密 clearance Cookie: %w", err)
+	}
+	payload.Config.Clearance.CFCookies = cookies
 	return payload.Config, row.UpdatedAt, row.Revision, true, nil
 }
 
@@ -55,8 +61,15 @@ func (r *RuntimeSettingsRepository) Save(ctx context.Context, value settingsdoma
 	if err != nil {
 		return time.Time{}, 0, fmt.Errorf("加密 Statsig 手动值: %w", err)
 	}
+	cookies, err := r.cipher.Encrypt(value.Clearance.CFCookies)
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("加密 clearance Cookie: %w", err)
+	}
 	value.ProviderWeb.StatsigManualValue = ""
-	payload, err := json.Marshal(runtimeSettingsPayload{Config: value, EncryptedStatsigManualValue: manualValue})
+	value.Clearance.CFCookies = ""
+	payload, err := json.Marshal(runtimeSettingsPayload{
+		Config: value, EncryptedStatsigManualValue: manualValue, EncryptedClearanceCFCookies: cookies,
+	})
 	if err != nil {
 		return time.Time{}, 0, fmt.Errorf("编码运行设置: %w", err)
 	}

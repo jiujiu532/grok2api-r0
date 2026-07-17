@@ -103,6 +103,19 @@ type ClientKeyDefaultsConfig struct {
 	MaxConcurrent int
 }
 
+// ClearanceConfig 是管理接口使用的 clearance / 反爬输入。
+type ClearanceConfig struct {
+	Mode                 string
+	CFCookies            string
+	CFCookiesConfigured  bool
+	UserAgent            string
+	FlareSolverrURL      string
+	Timeout              string
+	RefreshInterval      string
+	ClientHintsEnabled   bool
+	AntiBotCooldown      string
+}
+
 // EditableConfig 聚合管理端允许修改的运行参数。
 type EditableConfig struct {
 	Server            ServerConfig
@@ -115,6 +128,7 @@ type EditableConfig struct {
 	Routing           RoutingConfig
 	Audit             AuditConfig
 	ClientKeyDefaults ClientKeyDefaultsConfig
+	Clearance         ClearanceConfig
 }
 
 // Snapshot 表示当前运行设置和需要重启才能生效的字段。
@@ -303,6 +317,44 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 	base.ClientKeyDefaults = config.ClientKeyDefaultsConfig{
 		RPMLimit: value.ClientKeyDefaults.RPMLimit, MaxConcurrent: value.ClientKeyDefaults.MaxConcurrent,
 	}
+	clearance := value.Clearance
+	if strings.TrimSpace(clearance.Mode) == "" {
+		clearance.Mode = base.Clearance.Mode
+		if clearance.Mode == "" {
+			clearance.Mode = "none"
+		}
+	}
+	if strings.TrimSpace(clearance.UserAgent) == "" {
+		clearance.UserAgent = base.Clearance.UserAgent
+	}
+	if clearance.Timeout <= 0 {
+		clearance.Timeout = base.Clearance.Timeout.Value()
+		if clearance.Timeout <= 0 {
+			clearance.Timeout = 60 * time.Second
+		}
+	}
+	if clearance.RefreshInterval <= 0 {
+		clearance.RefreshInterval = base.Clearance.RefreshInterval.Value()
+		if clearance.RefreshInterval <= 0 {
+			clearance.RefreshInterval = time.Hour
+		}
+	}
+	if clearance.AntiBotCooldown <= 0 {
+		clearance.AntiBotCooldown = base.Clearance.AntiBotCooldown.Value()
+		if clearance.AntiBotCooldown <= 0 {
+			clearance.AntiBotCooldown = 45 * time.Second
+		}
+	}
+	// 旧版本无 ClientHints 字段时 json 反序列化为 false；仅当 Mode 非空时保留显式 false。
+	if strings.TrimSpace(value.Clearance.Mode) == "" && !value.Clearance.ClientHintsEnabled {
+		clearance.ClientHintsEnabled = true
+	}
+	base.Clearance = config.ClearanceConfig{
+		Mode: clearance.Mode, CFCookies: clearance.CFCookies, UserAgent: clearance.UserAgent,
+		FlareSolverrURL: clearance.FlareSolverrURL, Timeout: config.Duration(clearance.Timeout),
+		RefreshInterval: config.Duration(clearance.RefreshInterval), ClientHintsEnabled: clearance.ClientHintsEnabled,
+		AntiBotCooldown: config.Duration(clearance.AntiBotCooldown),
+	}
 	return base
 }
 
@@ -349,6 +401,12 @@ func toDomainConfig(value config.Config) settingsdomain.Config {
 		},
 		ClientKeyDefaults: settingsdomain.ClientKeyDefaultsConfig{
 			RPMLimit: value.ClientKeyDefaults.RPMLimit, MaxConcurrent: value.ClientKeyDefaults.MaxConcurrent,
+		},
+		Clearance: settingsdomain.ClearanceConfig{
+			Mode: value.Clearance.Mode, CFCookies: value.Clearance.CFCookies, UserAgent: value.Clearance.UserAgent,
+			FlareSolverrURL: value.Clearance.FlareSolverrURL, Timeout: value.Clearance.Timeout.Value(),
+			RefreshInterval: value.Clearance.RefreshInterval.Value(), ClientHintsEnabled: value.Clearance.ClientHintsEnabled,
+			AntiBotCooldown: value.Clearance.AntiBotCooldown.Value(),
 		},
 	}
 }
@@ -408,6 +466,15 @@ func mergeEditable(current config.Config, input EditableConfig) (config.Config, 
 	next.Audit.BatchSize = input.Audit.BatchSize
 	next.ClientKeyDefaults.RPMLimit = input.ClientKeyDefaults.RPMLimit
 	next.ClientKeyDefaults.MaxConcurrent = input.ClientKeyDefaults.MaxConcurrent
+	next.Clearance.Mode = strings.TrimSpace(input.Clearance.Mode)
+	if cookies := strings.TrimSpace(input.Clearance.CFCookies); cookies != "" {
+		next.Clearance.CFCookies = cookies
+	} else if !input.Clearance.CFCookiesConfigured {
+		next.Clearance.CFCookies = ""
+	}
+	next.Clearance.UserAgent = strings.TrimSpace(input.Clearance.UserAgent)
+	next.Clearance.FlareSolverrURL = strings.TrimSpace(input.Clearance.FlareSolverrURL)
+	next.Clearance.ClientHintsEnabled = input.Clearance.ClientHintsEnabled
 
 	durations := []struct {
 		path  string
@@ -428,6 +495,9 @@ func mergeEditable(current config.Config, input EditableConfig) (config.Config, 
 		{"providerConsole.chatTimeout", input.ProviderConsole.ChatTimeout, func(value config.Duration) { next.Provider.Console.ChatTimeout = value }},
 		{"media.cleanupInterval", input.Media.CleanupInterval, func(value config.Duration) { next.Media.CleanupInterval = value }},
 		{"batch.randomDelay", input.Batch.RandomDelay, func(value config.Duration) { next.Batch.RandomDelay = value }},
+		{"clearance.timeout", input.Clearance.Timeout, func(value config.Duration) { next.Clearance.Timeout = value }},
+		{"clearance.refreshInterval", input.Clearance.RefreshInterval, func(value config.Duration) { next.Clearance.RefreshInterval = value }},
+		{"clearance.antiBotCooldown", input.Clearance.AntiBotCooldown, func(value config.Duration) { next.Clearance.AntiBotCooldown = value }},
 	}
 	for _, item := range durations {
 		value, err := time.ParseDuration(strings.TrimSpace(item.value))
@@ -483,5 +553,11 @@ func toEditable(cfg config.Config) EditableConfig {
 			BufferSize: cfg.Audit.BufferSize, BatchSize: cfg.Audit.BatchSize, FlushInterval: cfg.Audit.FlushInterval.String(),
 		},
 		ClientKeyDefaults: ClientKeyDefaultsConfig{RPMLimit: cfg.ClientKeyDefaults.RPMLimit, MaxConcurrent: cfg.ClientKeyDefaults.MaxConcurrent},
+		Clearance: ClearanceConfig{
+			Mode: cfg.Clearance.Mode, CFCookiesConfigured: strings.TrimSpace(cfg.Clearance.CFCookies) != "",
+			UserAgent: cfg.Clearance.UserAgent, FlareSolverrURL: cfg.Clearance.FlareSolverrURL,
+			Timeout: cfg.Clearance.Timeout.String(), RefreshInterval: cfg.Clearance.RefreshInterval.String(),
+			ClientHintsEnabled: cfg.Clearance.ClientHintsEnabled, AntiBotCooldown: cfg.Clearance.AntiBotCooldown.String(),
+		},
 	}
 }

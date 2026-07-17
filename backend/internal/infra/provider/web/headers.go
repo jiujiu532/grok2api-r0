@@ -20,10 +20,13 @@ func buildHeaders(token string, lease *infraegress.Lease, contentType string) ht
 	value.Set("User-Agent", lease.UserAgent)
 	value.Set("Cookie", infraegress.BuildSSOCookie(token, lease.CFCookies))
 	value.Set("x-xai-request-id", newRequestUUID())
+	if lease != nil && lease.ClientHintsEnabled {
+		infraegress.ApplyClientHints(value, lease.UserAgent)
+	}
 	return value
 }
 
-// applyAppHeaders 补齐真实浏览器同源 fetch 会携带的稳定请求头，不伪造 Sentry 或 Client Hints。
+// applyAppHeaders 补齐真实浏览器同源 fetch 会携带的稳定请求头。
 func applyAppHeaders(value http.Header, origin, referer string) {
 	value.Set("Origin", origin)
 	value.Set("Referer", referer)

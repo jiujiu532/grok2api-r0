@@ -21,6 +21,17 @@ export type SettingsConfigDTO = {
   routing: { stickyTTL: string; cooldownBase: string; cooldownMax: string; capacityWait: string; maxAttempts: number };
   audit: { bufferSize: number; batchSize: number; flushInterval: string };
   clientKeyDefaults: { rpmLimit: number; maxConcurrent: number };
+  clearance: {
+    mode: "none" | "manual" | "flaresolverr";
+    cfCookies?: string;
+    cfCookiesConfigured: boolean;
+    userAgent: string;
+    flareSolverrURL: string;
+    timeout: string;
+    refreshInterval: string;
+    clientHintsEnabled: boolean;
+    antiBotCooldown: string;
+  };
 };
 
 export type EgressNodeDTO = {
@@ -60,6 +71,17 @@ const settingsConfigValidator = hasShape({
   routing: hasShape({ stickyTTL: isString, cooldownBase: isString, cooldownMax: isString, capacityWait: isString, maxAttempts: isNumber }),
   audit: hasShape({ bufferSize: isNumber, batchSize: isNumber, flushInterval: isString }),
   clientKeyDefaults: hasShape({ rpmLimit: isNumber, maxConcurrent: isNumber }),
+  clearance: hasShape({
+    mode: isOneOf("none", "manual", "flaresolverr"),
+    cfCookies: isOptional(isString),
+    cfCookiesConfigured: isBoolean,
+    userAgent: isString,
+    flareSolverrURL: isString,
+    timeout: isString,
+    refreshInterval: isString,
+    clientHintsEnabled: isBoolean,
+    antiBotCooldown: isString,
+  }),
 });
 const decodeSettingsSnapshot = createObjectDecoder<SettingsSnapshotDTO>("settings", {
   config: settingsConfigValidator,
@@ -89,6 +111,18 @@ export function getSettings(): Promise<SettingsSnapshotDTO> {
 
 export function updateSettings(revision: string, config: SettingsConfigDTO): Promise<SettingsSnapshotDTO> {
   return apiRequest("/api/admin/v1/settings", { method: "PUT", body: { revision, config } }, decodeSettingsSnapshot);
+}
+
+export type ClearanceRefreshResultDTO = { updated: number; failed: number; skipped: number };
+
+const decodeClearanceRefreshResult = createObjectDecoder<ClearanceRefreshResultDTO>("clearance refresh", {
+  updated: isNumber,
+  failed: isNumber,
+  skipped: isNumber,
+});
+
+export function refreshClearance(): Promise<ClearanceRefreshResultDTO> {
+  return apiRequest("/api/admin/v1/settings/clearance/refresh", { method: "POST", body: {} }, decodeClearanceRefreshResult);
 }
 
 export function listEgressNodes(input?: { sortBy?: string; sortOrder?: SortOrder }): Promise<EgressNodeListDTO> {

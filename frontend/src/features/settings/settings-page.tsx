@@ -11,15 +11,26 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EgressNodes } from "@/features/settings/egress-nodes";
+import { refreshClearance } from "@/features/settings/settings-api";
 import { VersionUpdateSection } from "@/features/system/version-update";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isByteSizeUnit, isDurationUnit, type ByteSizeValue, type DurationValue } from "@/features/settings/settings-model";
 import { useSettings } from "@/features/settings/use-settings";
 import { ErrorState } from "@/shared/components/data-state";
+import { toast } from "sonner";
 
 export function SettingsPage() {
   const { t } = useTranslation();
   const { form, settingsQuery, updateMutation, reset } = useSettings();
+
+  const refreshClearanceAction = async () => {
+    try {
+      const result = await refreshClearance();
+      toast.success(t("settings.clearance.refreshDone", { updated: result.updated, failed: result.failed, skipped: result.skipped }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("settings.clearance.refreshFailed"));
+    }
+  };
 
   if (settingsQuery.isError) {
     return <ErrorState message={settingsQuery.error.message} onRetry={() => void settingsQuery.refetch()} />;
@@ -199,6 +210,56 @@ export function SettingsPage() {
               <SettingsField controlId="audit-buffer-size" label={t("settings.audit.bufferSize")} badge={t("settings.restartRequired")} error={form.formState.errors.audit?.bufferSize?.message}><Input id="audit-buffer-size" type="number" min={1} max={262_144} {...form.register("audit.bufferSize", { valueAsNumber: true })} /></SettingsField>
               <SettingsField controlId="audit-batch-size" label={t("settings.audit.batchSize")} error={form.formState.errors.audit?.batchSize?.message}><Input id="audit-batch-size" type="number" min={1} max={4_096} {...form.register("audit.batchSize", { valueAsNumber: true })} /></SettingsField>
               <SettingsField controlId="audit-flush-interval" label={t("settings.audit.flushInterval")} error={form.formState.errors.audit?.flushInterval?.message}><Controller control={form.control} name="audit.flushInterval" render={({ field }) => <DurationInput id="audit-flush-interval" value={field.value} onChange={field.onChange} />} /></SettingsField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title={t("settings.clearance.title")}
+            action={(
+              <Button type="button" variant="secondary" size="sm" disabled={loading || updateMutation.isPending || form.watch("clearance.mode") === "none"} onClick={() => void refreshClearanceAction()}>
+                <RefreshCw />{t("settings.clearance.refreshNow")}
+              </Button>
+            )}
+          >
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <SettingsField controlId="clearance-mode" className="sm:col-span-2" label={t("settings.clearance.mode")} description={t("settings.clearance.modeHelp")} error={form.formState.errors.clearance?.mode?.message}>
+                <Controller control={form.control} name="clearance.mode" render={({ field }) => (
+                  <div id="clearance-mode" role="radiogroup" className="grid h-8 grid-cols-3 rounded-md bg-muted/55 p-0.5">
+                    <Button type="button" role="radio" size="sm" variant={field.value === "none" ? "secondary" : "ghost"} className="h-7 text-xs shadow-none" aria-checked={field.value === "none"} onClick={() => field.onChange("none")}>{t("settings.clearance.modeNone")}</Button>
+                    <Button type="button" role="radio" size="sm" variant={field.value === "manual" ? "secondary" : "ghost"} className="h-7 text-xs shadow-none" aria-checked={field.value === "manual"} onClick={() => field.onChange("manual")}>{t("settings.clearance.modeManual")}</Button>
+                    <Button type="button" role="radio" size="sm" variant={field.value === "flaresolverr" ? "secondary" : "ghost"} className="h-7 text-xs shadow-none" aria-checked={field.value === "flaresolverr"} onClick={() => field.onChange("flaresolverr")}>{t("settings.clearance.modeFlare")}</Button>
+                  </div>
+                )} />
+              </SettingsField>
+              <SettingsField controlId="clearance-user-agent" className="sm:col-span-2" label={t("settings.clearance.userAgent")} error={form.formState.errors.clearance?.userAgent?.message}>
+                <Input id="clearance-user-agent" {...form.register("clearance.userAgent")} />
+              </SettingsField>
+              {form.watch("clearance.mode") === "manual" ? (
+                <SettingsField controlId="clearance-cf-cookies" className="sm:col-span-2" label={t("settings.clearance.cfCookies")} badge={form.watch("clearance.cfCookiesConfigured") ? t("settings.clearance.configured") : undefined} error={form.formState.errors.clearance?.cfCookies?.message}>
+                  <Input id="clearance-cf-cookies" type="password" autoComplete="off" placeholder={form.watch("clearance.cfCookiesConfigured") ? t("settings.clearance.keepConfigured") : t("settings.clearance.cfCookiesPlaceholder")} {...form.register("clearance.cfCookies")} />
+                </SettingsField>
+              ) : null}
+              {form.watch("clearance.mode") === "flaresolverr" ? (
+                <>
+                  <SettingsField controlId="clearance-flaresolverr-url" className="sm:col-span-2" label={t("settings.clearance.flareSolverrURL")} error={form.formState.errors.clearance?.flareSolverrURL?.message}>
+                    <Input id="clearance-flaresolverr-url" type="url" placeholder="http://127.0.0.1:8191" {...form.register("clearance.flareSolverrURL")} />
+                  </SettingsField>
+                  <SettingsField controlId="clearance-timeout" label={t("settings.clearance.timeout")} error={form.formState.errors.clearance?.timeout?.message}>
+                    <Controller control={form.control} name="clearance.timeout" render={({ field }) => <DurationInput id="clearance-timeout" value={field.value} onChange={field.onChange} />} />
+                  </SettingsField>
+                  <SettingsField controlId="clearance-refresh-interval" label={t("settings.clearance.refreshInterval")} error={form.formState.errors.clearance?.refreshInterval?.message}>
+                    <Controller control={form.control} name="clearance.refreshInterval" render={({ field }) => <DurationInput id="clearance-refresh-interval" value={field.value} onChange={field.onChange} />} />
+                  </SettingsField>
+                </>
+              ) : null}
+              <SettingsField controlId="clearance-anti-bot-cooldown" label={t("settings.clearance.antiBotCooldown")} description={t("settings.clearance.antiBotCooldownHelp")} error={form.formState.errors.clearance?.antiBotCooldown?.message}>
+                <Controller control={form.control} name="clearance.antiBotCooldown" render={({ field }) => <DurationInput id="clearance-anti-bot-cooldown" value={field.value} onChange={field.onChange} />} />
+              </SettingsField>
+              <SettingsField controlId="clearance-client-hints" label={t("settings.clearance.clientHintsEnabled")} description={t("settings.clearance.clientHintsHelp")}>
+                <Controller control={form.control} name="clearance.clientHintsEnabled" render={({ field }) => (
+                  <div className="flex h-8 items-center"><Switch id="clearance-client-hints" checked={field.value} onCheckedChange={field.onChange} /></div>
+                )} />
+              </SettingsField>
             </div>
           </SettingsSection>
 

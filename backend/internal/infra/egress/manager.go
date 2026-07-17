@@ -26,16 +26,17 @@ const nodeSnapshotTTL = time.Second
 const stickyProxyRetryLimit = 2
 
 type Lease struct {
-	NodeID    uint64
-	NodeName  string
-	Scope     domain.Scope
-	ProxyURL  string
-	UserAgent string
-	CFCookies string
-	client    requestClient
-	browser   *browserClient
-	sticky    bool
-	release   func()
+	NodeID             uint64
+	NodeName           string
+	Scope              domain.Scope
+	ProxyURL           string
+	UserAgent          string
+	CFCookies          string
+	ClientHintsEnabled bool
+	client             requestClient
+	browser            *browserClient
+	sticky             bool
+	release            func()
 }
 
 type requestClient interface {
@@ -64,6 +65,7 @@ type Manager struct {
 	inflight   map[uint64]int
 	nodes      map[domain.Scope]cachedNodeSnapshot
 	nodeLoads  singleflight.Group
+	policy     ClearancePolicy
 }
 
 type cachedClient struct {
@@ -83,7 +85,51 @@ type cachedNodeSnapshot struct {
 }
 
 func NewManager(repository repository.EgressRepository, cipher *security.Cipher) *Manager {
-	return &Manager{repository: repository, cipher: cipher, clients: make(map[clientCacheKey]cachedClient), inflight: make(map[uint64]int), nodes: make(map[domain.Scope]cachedNodeSnapshot)}
+	return &Manager{
+		repository: repository, cipher: cipher,
+		clients: make(map[clientCacheKey]cachedClient), inflight: make(map[uint64]int),
+		nodes: make(map[domain.Scope]cachedNodeSnapshot), policy: DefaultClearancePolicy(),
+	}
+}
+
+// UpdateClearancePolicy 热更新全局 clearance / 反爬策略。
+func (m *Manager) UpdateClearancePolicy(policy ClearancePolicy) {
+	if m == nil {
+		return
+	}
+	normalized := policy
+	normalized.Mode = NormalizeClearanceMode(policy.Mode)
+	if normalized.AntiBotCooldown <= 0 {
+		normalized.AntiBotCooldown = DefaultAntiBotCooldown
+	}
+	if normalized.Timeout <= 0 {
+		normalized.Timeout = DefaultClearanceTimeout
+	}
+	if normalized.RefreshInterval <= 0 {
+		normalized.RefreshInterval = DefaultClearanceRefresh
+	}
+	if strings.TrimSpace(normalized.UserAgent) == "" {
+		normalized.UserAgent = DefaultUserAgent
+	}
+	m.mu.Lock()
+	m.policy = normalized
+	m.mu.Unlock()
+}
+
+func (m *Manager) clearancePolicy() ClearancePolicy {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.policy
+}
+
+// ClientHintsEnabled 返回是否注入 Sec-Ch-Ua 系列头。
+func (m *Manager) ClientHintsEnabled() bool {
+	return m.clearancePolicy().ClientHintsEnabled
+}
+
+// Policy 返回当前 clearance 策略快照。
+func (m *Manager) Policy() ClearancePolicy {
+	return m.clearancePolicy()
 }
 
 func (m *Manager) Acquire(ctx context.Context, scope domain.Scope, affinity string) (*Lease, error) {
@@ -176,6 +222,7 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 			return nil, false, err
 		}
 	}
+	policy := m.clearancePolicy()
 	cookies := ""
 	if scope != domain.ScopeBuild {
 		cookies, err = m.cipher.Decrypt(selected.EncryptedCloudflareCookie)
@@ -186,10 +233,17 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 		if credentialCookies != "" {
 			cookies = credentialCookies
 		}
+		// 节点未配置 CF Cookie 时，manual/flaresolverr 模式回退到全局 clearance。
+		if cookies == "" && policy.Mode != ClearanceModeNone {
+			cookies = application.SanitizeCloudflareCookies(policy.CFCookies)
+		}
 	}
 	userAgent := ""
 	if scope != domain.ScopeBuild {
 		userAgent = strings.TrimSpace(selected.UserAgent)
+	}
+	if scope != domain.ScopeBuild && userAgent == "" {
+		userAgent = strings.TrimSpace(policy.UserAgent)
 	}
 	if scope != domain.ScopeBuild && userAgent == "" {
 		userAgent = DefaultUserAgent
@@ -203,16 +257,20 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 	m.mu.Unlock()
 	recordSelection(ctx, Selection{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, Proxied: proxyURL != ""})
 	var once sync.Once
-	return &Lease{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL, UserAgent: userAgent, CFCookies: cookies, client: client.client, browser: client.browser, sticky: sticky, release: func() {
-		once.Do(func() {
-			m.mu.Lock()
-			m.inflight[selected.ID]--
-			if m.inflight[selected.ID] <= 0 {
-				delete(m.inflight, selected.ID)
-			}
-			m.mu.Unlock()
-		})
-	}}, true, nil
+	return &Lease{
+		NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL,
+		UserAgent: userAgent, CFCookies: cookies, ClientHintsEnabled: policy.ClientHintsEnabled,
+		client: client.client, browser: client.browser, sticky: sticky, release: func() {
+			once.Do(func() {
+				m.mu.Lock()
+				m.inflight[selected.ID]--
+				if m.inflight[selected.ID] <= 0 {
+					delete(m.inflight, selected.ID)
+				}
+				m.mu.Unlock()
+			})
+		},
+	}, true, nil
 }
 
 func renderAccountProxyURL(template, accountKey string) (string, error) {
@@ -345,7 +403,7 @@ func (m *Manager) clientFor(id uint64, scope domain.Scope, proxyURL, userAgent, 
 		}
 		value.client = client
 	} else {
-		client, err := newBrowserClient(proxyURL)
+		client, err := newBrowserClient(proxyURL, userAgent)
 		if err != nil {
 			return cachedClient{}, err
 		}
@@ -411,9 +469,15 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 			// unrelated accounts.
 			return
 		}
+		// anti-bot：降健康、冷却节点、销毁连接池，迫使下次 Acquire 换出口。
 		value.FailureCount++
-		value.Health = max(0.05, value.Health*0.7)
-		value.CooldownUntil = nil
+		value.Health = max(0.05, value.Health*0.25)
+		cooldown := m.clearancePolicy().AntiBotCooldown
+		if cooldown <= 0 {
+			cooldown = DefaultAntiBotCooldown
+		}
+		until := now.Add(cooldown)
+		value.CooldownUntil = &until
 		value.LastError = "anti-bot rejection"
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)

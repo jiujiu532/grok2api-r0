@@ -50,6 +50,19 @@ type Config struct {
 	Routing           RoutingConfig           `yaml:"routing"`
 	Audit             AuditConfig             `yaml:"audit"`
 	ClientKeyDefaults ClientKeyDefaultsConfig `yaml:"clientKeyDefaults"`
+	Clearance         ClearanceConfig         `yaml:"-"`
+}
+
+// ClearanceConfig 是运行时 clearance / 反爬配置（经管理端热加载）。
+type ClearanceConfig struct {
+	Mode               string
+	CFCookies          string
+	UserAgent          string
+	FlareSolverrURL    string
+	Timeout            Duration
+	RefreshInterval    Duration
+	ClientHintsEnabled bool
+	AntiBotCooldown    Duration
 }
 
 type ServerConfig struct {
@@ -444,6 +457,31 @@ func (c Config) Validate() error {
 	if c.ClientKeyDefaults.RPMLimit < 1 || c.ClientKeyDefaults.RPMLimit > clientkeydomain.MaxRPMLimit || c.ClientKeyDefaults.MaxConcurrent < 1 || c.ClientKeyDefaults.MaxConcurrent > clientkeydomain.MaxConcurrent {
 		return errors.New("clientKeyDefaults 超出允许范围")
 	}
+	switch strings.ToLower(strings.TrimSpace(c.Clearance.Mode)) {
+	case "", "none", "manual", "flaresolverr":
+	default:
+		return errors.New("clearance.mode 必须是 none、manual 或 flaresolverr")
+	}
+	if mode := strings.ToLower(strings.TrimSpace(c.Clearance.Mode)); mode == "flaresolverr" {
+		if strings.TrimSpace(c.Clearance.FlareSolverrURL) == "" {
+			return errors.New("clearance.flaresolverrURL 在 flaresolverr 模式下不能为空")
+		}
+		if _, err := url.ParseRequestURI(strings.TrimSpace(c.Clearance.FlareSolverrURL)); err != nil {
+			return errors.New("clearance.flaresolverrURL 必须是有效 URL")
+		}
+	}
+	if ua := strings.TrimSpace(c.Clearance.UserAgent); ua != "" && len(ua) > 512 {
+		return errors.New("clearance.userAgent 过长")
+	}
+	if c.Clearance.Timeout.Value() < 5*time.Second || c.Clearance.Timeout.Value() > 5*time.Minute {
+		return errors.New("clearance.timeout 必须在 5 秒到 5 分钟之间")
+	}
+	if c.Clearance.RefreshInterval.Value() < time.Minute || c.Clearance.RefreshInterval.Value() > 24*time.Hour {
+		return errors.New("clearance.refreshInterval 必须在 1 分钟到 24 小时之间")
+	}
+	if c.Clearance.AntiBotCooldown.Value() < 5*time.Second || c.Clearance.AntiBotCooldown.Value() > time.Hour {
+		return errors.New("clearance.antiBotCooldown 必须在 5 秒到 1 小时之间")
+	}
 	return nil
 }
 
@@ -507,6 +545,11 @@ func defaultConfig() Config {
 		},
 		Audit:             AuditConfig{BufferSize: 16384, BatchSize: 256, FlushInterval: Duration(250 * time.Millisecond)},
 		ClientKeyDefaults: ClientKeyDefaultsConfig{RPMLimit: clientkeydomain.DefaultRPMLimit, MaxConcurrent: clientkeydomain.DefaultMaxConcurrent},
+		Clearance: ClearanceConfig{
+			Mode: "none", UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+			Timeout: Duration(60 * time.Second), RefreshInterval: Duration(time.Hour),
+			ClientHintsEnabled: true, AntiBotCooldown: Duration(45 * time.Second),
+		},
 	}
 }
 

@@ -106,6 +106,40 @@ export const settingsSchema = z.object({
   audit: z.object({ bufferSize: positiveInteger.max(262_144), batchSize: positiveInteger.max(4_096), flushInterval: auditFlushDuration })
     .refine((value) => value.batchSize <= value.bufferSize, { path: ["batchSize"] }),
   clientKeyDefaults: z.object({ rpmLimit: positiveInteger.max(100_000), maxConcurrent: positiveInteger.max(1_024) }),
+  clearance: z.object({
+    mode: z.enum(["none", "manual", "flaresolverr"]),
+    cfCookies: z.string().max(16_384),
+    cfCookiesConfigured: z.boolean(),
+    userAgent: z.string().trim().max(512),
+    flareSolverrURL: z.string().trim().max(2048),
+    timeout: durationSchema.refine((value) => {
+      const seconds = durationSeconds(value);
+      return seconds >= 5 && seconds <= 5 * 60;
+    }),
+    refreshInterval: durationSchema.refine((value) => {
+      const seconds = durationSeconds(value);
+      return seconds >= 60 && seconds <= 86_400;
+    }),
+    clientHintsEnabled: z.boolean(),
+    antiBotCooldown: durationSchema.refine((value) => {
+      const seconds = durationSeconds(value);
+      return seconds >= 5 && seconds <= 3_600;
+    }),
+  }).superRefine((value, context) => {
+    if (value.mode === "flaresolverr") {
+      try {
+        const parsed = new URL(value.flareSolverrURL);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          context.addIssue({ code: "custom", path: ["flareSolverrURL"], message: "invalid" });
+        }
+      } catch {
+        context.addIssue({ code: "custom", path: ["flareSolverrURL"], message: "invalid" });
+      }
+    }
+    if (value.mode === "manual" && !value.cfCookiesConfigured && value.cfCookies.trim().length === 0 && value.userAgent.trim().length === 0) {
+      context.addIssue({ code: "custom", path: ["cfCookies"], message: "required" });
+    }
+  }),
 });
 
 export type SettingsForm = z.infer<typeof settingsSchema>;
@@ -137,6 +171,13 @@ export function toSettingsForm(config: SettingsConfigDTO): SettingsForm {
     },
     audit: { bufferSize: config.audit.bufferSize, batchSize: config.audit.batchSize, flushInterval: parseDuration(config.audit.flushInterval) },
     clientKeyDefaults: config.clientKeyDefaults,
+    clearance: {
+      ...config.clearance,
+      cfCookies: "",
+      timeout: parseDuration(config.clearance.timeout),
+      refreshInterval: parseDuration(config.clearance.refreshInterval),
+      antiBotCooldown: parseDuration(config.clearance.antiBotCooldown),
+    },
   };
 }
 
@@ -166,6 +207,17 @@ export function toSettingsDTO(config: SettingsForm): SettingsConfigDTO {
     },
     audit: { bufferSize: config.audit.bufferSize, batchSize: config.audit.batchSize, flushInterval: formatDuration(config.audit.flushInterval) },
     clientKeyDefaults: config.clientKeyDefaults,
+    clearance: {
+      mode: config.clearance.mode,
+      cfCookies: config.clearance.cfCookies,
+      cfCookiesConfigured: config.clearance.cfCookiesConfigured,
+      userAgent: config.clearance.userAgent,
+      flareSolverrURL: config.clearance.flareSolverrURL,
+      timeout: formatDuration(config.clearance.timeout),
+      refreshInterval: formatDuration(config.clearance.refreshInterval),
+      clientHintsEnabled: config.clearance.clientHintsEnabled,
+      antiBotCooldown: formatDuration(config.clearance.antiBotCooldown),
+    },
   };
 }
 
