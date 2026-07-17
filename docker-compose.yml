@@ -3,7 +3,8 @@ name: grok2api
 services:
   grok2api:
     container_name: grok2api
-    image: "${GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:latest}"
+    # Release tag is synchronized from VERSION; GROK2API_IMAGE remains available for overrides.
+    image: "${GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:3.0.2}"
     ports:
       - "${GROK2API_PORT:-8000}:8000"
     environment:

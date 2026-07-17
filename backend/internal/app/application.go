@@ -237,6 +237,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	accountSyncService.UpdateConcurrency(cfg.Batch.ImportConcurrency)
 	egressService := egressapp.NewService(egressRepo, cipher, infraegress.DefaultUserAgent, cfg.Provider.Console.UserAgent)
 	clearanceService := clearanceapp.NewService(egressRepo, cipher, egressManager.Policy, logger)
+	clearanceService.SetRefreshConcurrency(cfg.Batch.RefreshConcurrency)
+	clearanceService.SetCacheInvalidator(egressManager.InvalidateNodeCache)
 	clientKeyService := clientkeyapp.NewService(clientKeyRepo, rateLimiter, concurrency, cfg.ClientKeyDefaults.RPMLimit, cfg.ClientKeyDefaults.MaxConcurrent, cipher)
 	auditService := auditapp.NewService(auditRepo, logger, cfg.Audit.BufferSize, cfg.Audit.BatchSize, cfg.Audit.FlushInterval.Value())
 	dashboardService := dashboardapp.NewService(dashboardRepo)
@@ -264,6 +266,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		conversionPool.UpdateLimit(next.Batch.ConversionConcurrency)
 		syncPool.UpdateLimit(next.Batch.SyncConcurrency)
 		refreshPool.UpdateLimit(next.Batch.RefreshConcurrency)
+		clearanceService.SetRefreshConcurrency(next.Batch.RefreshConcurrency)
 		for _, pool := range []*batch.Pool{importPool, conversionPool, syncPool, refreshPool} {
 			pool.UpdateJitter(next.Batch.RandomDelay.Value())
 		}

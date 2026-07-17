@@ -36,12 +36,11 @@ resolve_default_image() {
     return 0
   fi
   local ver=""
-  # 仅当从仓库目录执行时才读本地 VERSION；curl|bash / gist 一键装走 latest
+  # 仅当从仓库目录执行时才读本地 VERSION；远程一键安装走 latest。
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-  if [ -n "$script_dir" ] && [ -f "$script_dir/../VERSION" ]; then
-    ver=$(tr -d '[:space:]' < "$script_dir/../VERSION" 2>/dev/null || true)
-    ver="${ver#v}"
+  if [ -n "$script_dir" ] && [ -f "$script_dir/image-tag.sh" ] && [ -f "$script_dir/../VERSION" ]; then
+    ver=$(bash "$script_dir/image-tag.sh" < "$script_dir/../VERSION" 2>/dev/null || true)
   fi
   if [ -n "$ver" ] && [ "$ver" != "dev" ]; then
     IMAGE="${GHCR_IMAGE_REPO}:${ver}"
@@ -367,7 +366,7 @@ server:
 auth:
   accessTokenTTL: 15m
   refreshTokenTTL: 720h
-  secureCookies: false
+  secureCookies: ${SECURE_COOKIES}
 
 secrets:
   jwtSecret: "${jwt_secret}"
@@ -404,7 +403,10 @@ media:
   local:
     path: "./data/media"
 EOF
-  chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+  if ! chmod 600 "$CONFIG_FILE"; then
+    err "无法限制 config.yaml 权限"
+    return 1
+  fi
 }
 
 write_post_install_guide() {
@@ -463,9 +465,12 @@ bootstrap_runtime_proxy_config() {
 
   # 登录
   token=$(
-    python3 - "$base" "$user" "$pass" <<'PY'
-import json, sys, urllib.request, urllib.error
-base, user, password = sys.argv[1:4]
+    GROK2API_BOOTSTRAP_USER="$user" GROK2API_BOOTSTRAP_PASSWORD="$pass" \
+    python3 - "$base" <<'PY'
+import json, os, sys, urllib.request, urllib.error
+base = sys.argv[1]
+user = os.environ["GROK2API_BOOTSTRAP_USER"]
+password = os.environ["GROK2API_BOOTSTRAP_PASSWORD"]
 req = urllib.request.Request(
     base.rstrip("/") + "/api/admin/v1/auth/login",
     data=json.dumps({"username": user, "password": password}).encode(),
@@ -590,11 +595,9 @@ cmd_install() {
   log "========================================="
 
   if is_installed; then
-    warn "检测到已安装: $INSTALL_DIR"
-    if ! confirm "覆盖配置并重建应用容器（数据卷默认保留）" "N"; then
-      info "已取消"
-      return 0
-    fi
+    warn "检测到已安装: $INSTALL_DIR；不会覆盖 config.yaml 或加密密钥"
+    info "请使用 update 拉取并重启现有安装"
+    return 0
   fi
 
   log ""
@@ -618,6 +621,13 @@ cmd_install() {
     break
   done
 
+  if confirm "是否通过 HTTPS 反向代理提供管理端" "Y"; then
+    SECURE_COOKIES=true
+  else
+    SECURE_COOKIES=false
+    warn "本地 HTTP 登录将使用非安全 Cookie；HTTPS 反代时请设为 true"
+  fi
+
   while true; do
     service_port=$(ask "宿主机端口" "8000")
     if [[ ! "$service_port" =~ ^[0-9]+$ ]] || [ "$service_port" -lt 1 ] || [ "$service_port" -gt 65535 ]; then
@@ -636,11 +646,15 @@ cmd_install() {
 
   log ""
   log "[3/5] 写入配置..."
-  mkdir -p "$INSTALL_DIR"
-  ensure_app_network
-  generate_config_yaml "$jwt_secret" "$enc_key" "$admin_user" "$admin_pass"
-  generate_app_compose "$service_port"
   umask 077
+  mkdir -p "$INSTALL_DIR"
+  if ! chmod 700 "$INSTALL_DIR"; then
+    err "无法限制安装目录权限"
+    return 1
+  fi
+  ensure_app_network
+  generate_config_yaml "$jwt_secret" "$enc_key" "$admin_user" "$admin_pass" || return 1
+  generate_app_compose "$service_port"
   cat > "$CREDENTIALS_FILE" <<EOF
 admin_username=$admin_user
 admin_password=$admin_pass
@@ -650,7 +664,10 @@ credential_encryption_key=$enc_key
 installed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 script_version=$SCRIPT_VERSION
 EOF
-  chmod 600 "$CREDENTIALS_FILE" 2>/dev/null || true
+  if ! chmod 600 "$CREDENTIALS_FILE"; then
+    err "无法限制凭据文件权限"
+    return 1
+  fi
   echo "$SCRIPT_VERSION" > "$INSTALL_DIR/.install-version"
   ok "config.yaml / docker-compose.yml 已生成"
 
@@ -709,8 +726,7 @@ EOF
   log "========================================="
   log ""
   log "  管理端:     http://127.0.0.1:${service_port}"
-  log "  管理员:     $admin_user"
-  log "  密码:       $admin_pass"
+  log "  管理员账号与密码已写入受限凭据文件"
   log "  安装目录:   $INSTALL_DIR"
   log "  凭据备份:   $CREDENTIALS_FILE"
   log "  后续步骤:   $INSTALL_DIR/POST_INSTALL.txt"
@@ -905,4 +921,6 @@ main() {
   done
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

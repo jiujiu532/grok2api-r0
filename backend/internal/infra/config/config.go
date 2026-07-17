@@ -466,8 +466,8 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.Clearance.FlareSolverrURL) == "" {
 			return errors.New("clearance.flaresolverrURL 在 flaresolverr 模式下不能为空")
 		}
-		if _, err := url.ParseRequestURI(strings.TrimSpace(c.Clearance.FlareSolverrURL)); err != nil {
-			return errors.New("clearance.flaresolverrURL 必须是有效 URL")
+		if err := signerurl.Validate(c.Clearance.FlareSolverrURL); err != nil {
+			return fmt.Errorf("clearance.flaresolverrURL 无效: %w", err)
 		}
 	}
 	if ua := strings.TrimSpace(c.Clearance.UserAgent); ua != "" && len(ua) > 512 {

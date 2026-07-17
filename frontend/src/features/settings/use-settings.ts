@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { getSettings, updateSettings } from "@/features/settings/settings-api";
+import { getSettings, refreshClearance, updateSettings } from "@/features/settings/settings-api";
 import { settingsSchema, toSettingsDTO, toSettingsForm, type SettingsForm } from "@/features/settings/settings-model";
 
 export function useSettings() {
@@ -23,6 +23,13 @@ export function useSettings() {
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : t("errors.generic")),
   });
+  const refreshClearanceMutation = useMutation({
+    mutationFn: refreshClearance,
+    onSuccess: (result) => {
+      toast.success(t("settings.clearance.refreshDone", { updated: result.updated, failed: result.failed, skipped: result.skipped }));
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : t("settings.clearance.refreshFailed")),
+  });
 
   useEffect(() => {
     if (settingsQuery.data) form.reset(toSettingsForm(settingsQuery.data.config));
@@ -32,6 +39,7 @@ export function useSettings() {
     form,
     settingsQuery,
     updateMutation,
+    refreshClearanceMutation,
     reset: () => { if (settingsQuery.data) form.reset(toSettingsForm(settingsQuery.data.config)); },
   };
 }

@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	domainegress "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
+	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -223,6 +226,51 @@ func TestApplySignedStatsigUsesManualValue(t *testing.T) {
 	adapter.applySignedStatsig(context.Background(), request, "token", nil)
 	if request.Header.Get("x-statsig-id") != value {
 		t.Fatalf("x-statsig-id = %q", request.Header.Get("x-statsig-id"))
+	}
+}
+
+func TestFetchStatsigMetaContentClientHintsMatchLeasePolicy(t *testing.T) {
+	chrome := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+	for _, test := range []struct {
+		name     string
+		enabled  bool
+		wantHint bool
+	}{
+		{name: "enabled chromium", enabled: true, wantHint: true},
+		{name: "disabled chromium", enabled: false, wantHint: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if got := request.Header.Get("Sec-Ch-Ua"); (got != "") != test.wantHint {
+					t.Errorf("Sec-Ch-Ua = %q, want hint present = %v", got, test.wantHint)
+				}
+				_, _ = io.WriteString(writer, `<meta name="grok-site-verification" content="meta-value">`)
+			}))
+			defer server.Close()
+			cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := infraegress.NewManager(egressRepositoryStub{}, cipher)
+			policy := infraegress.DefaultClearancePolicy()
+			policy.UserAgent = chrome
+			policy.ClientHintsEnabled = test.enabled
+			manager.UpdateClearancePolicy(policy)
+			lease, err := manager.Acquire(context.Background(), domainegress.ScopeWeb, "statsig")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lease.Release()
+
+			// When
+			value, err := fetchStatsigMetaContent(context.Background(), server.URL, "test-sso", lease)
+
+			// Then
+			if err != nil || value != "meta-value" {
+				t.Fatalf("value=%q err=%v", value, err)
+			}
+		})
 	}
 }
 

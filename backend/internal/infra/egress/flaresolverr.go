@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	application "github.com/chenyme/grok2api/backend/internal/application/egress"
+	"github.com/chenyme/grok2api/backend/internal/pkg/signerurl"
 )
 
 const (
@@ -37,8 +37,8 @@ type flareSolverProxy struct {
 }
 
 type flareSolverrResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	Status   string `json:"status"`
+	Message  string `json:"message"`
 	Solution *struct {
 		UserAgent string `json:"userAgent"`
 		Cookies   []struct {
@@ -54,7 +54,7 @@ func RefreshClearanceViaFlareSolverr(ctx context.Context, client *http.Client, e
 	if endpoint == "" {
 		return ClearanceBundle{}, fmt.Errorf("FlareSolverr 地址为空")
 	}
-	if _, err := url.ParseRequestURI(endpoint); err != nil {
+	if err := signerurl.Validate(endpoint); err != nil {
 		return ClearanceBundle{}, fmt.Errorf("FlareSolverr 地址无效: %w", err)
 	}
 	if timeout <= 0 {
@@ -77,13 +77,17 @@ func RefreshClearanceViaFlareSolverr(ctx context.Context, client *http.Client, e
 		return ClearanceBundle{}, err
 	}
 	requestURL := strings.TrimRight(endpoint, "/") + "/v1"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return ClearanceBundle{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if client == nil {
-		client = &http.Client{Timeout: timeout + 15*time.Second}
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -105,11 +109,7 @@ func RefreshClearanceViaFlareSolverr(ctx context.Context, client *http.Client, e
 		return ClearanceBundle{}, fmt.Errorf("解析 FlareSolverr 响应: %w", err)
 	}
 	if !strings.EqualFold(parsed.Status, "ok") || parsed.Solution == nil {
-		message := strings.TrimSpace(parsed.Message)
-		if message == "" {
-			message = "unknown error"
-		}
-		return ClearanceBundle{}, fmt.Errorf("FlareSolverr 失败: %s", message)
+		return ClearanceBundle{}, fmt.Errorf("FlareSolverr 返回失败响应")
 	}
 	parts := make([]string, 0, len(parsed.Solution.Cookies))
 	for _, cookie := range parsed.Solution.Cookies {

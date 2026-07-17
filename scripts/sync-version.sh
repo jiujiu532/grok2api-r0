@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 从根目录 VERSION 同步到 package.json / swagger 注解（唯一手改源：VERSION）
+# 从根目录 VERSION 同步到发布展示与 Compose 默认镜像（唯一手改源：VERSION）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
@@ -55,6 +55,20 @@ if swagger_json.exists():
     new = re.sub(r'"version":\s*"[^"]*"', f'"version": "{version}"', text, count=1)
     if new != text:
         write(swagger_json, new)
+
+compose = root / "docker-compose.yml"
+text = compose.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
+compose_marker = "GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:"
+for index, line in enumerate(lines):
+    if compose_marker not in line:
+        continue
+    ending = "\r\n" if line.endswith("\r\n") else "\n"
+    lines[index] = f'    image: "${{GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:{version}}}"{ending}'
+    break
+else:
+    raise SystemExit("docker-compose.yml default image was not updated")
+write(compose, "".join(lines))
 
 print(f"OK: app version = {version} (source: VERSION)")
 PY

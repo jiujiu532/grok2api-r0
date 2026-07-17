@@ -11,26 +11,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EgressNodes } from "@/features/settings/egress-nodes";
-import { refreshClearance } from "@/features/settings/settings-api";
 import { VersionUpdateSection } from "@/features/system/version-update";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isByteSizeUnit, isDurationUnit, type ByteSizeValue, type DurationValue } from "@/features/settings/settings-model";
 import { useSettings } from "@/features/settings/use-settings";
 import { ErrorState } from "@/shared/components/data-state";
-import { toast } from "sonner";
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { form, settingsQuery, updateMutation, reset } = useSettings();
-
-  const refreshClearanceAction = async () => {
-    try {
-      const result = await refreshClearance();
-      toast.success(t("settings.clearance.refreshDone", { updated: result.updated, failed: result.failed, skipped: result.skipped }));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("settings.clearance.refreshFailed"));
-    }
-  };
+  const { form, settingsQuery, updateMutation, refreshClearanceMutation, reset } = useSettings();
 
   if (settingsQuery.isError) {
     return <ErrorState message={settingsQuery.error.message} onRetry={() => void settingsQuery.refetch()} />;
@@ -216,8 +205,15 @@ export function SettingsPage() {
           <SettingsSection
             title={t("settings.clearance.title")}
             action={(
-              <Button type="button" variant="secondary" size="sm" disabled={loading || updateMutation.isPending || form.watch("clearance.mode") === "none"} onClick={() => void refreshClearanceAction()}>
-                <RefreshCw />{t("settings.clearance.refreshNow")}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={loading || updateMutation.isPending || refreshClearanceMutation.isPending || form.watch("clearance.mode") === "none"}
+                onClick={() => refreshClearanceMutation.mutate()}
+              >
+                {refreshClearanceMutation.isPending ? <Spinner /> : <RefreshCw />}
+                {t("settings.clearance.refreshNow")}
               </Button>
             )}
           >

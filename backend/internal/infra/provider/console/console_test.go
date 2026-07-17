@@ -342,6 +342,36 @@ func TestAdapterForwardsConsoleHeadersAndNormalizedBody(t *testing.T) {
 	}
 }
 
+func TestApplyHeadersClientHintsMatchLeasePolicy(t *testing.T) {
+	chrome := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+	firefox := "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
+	tests := []struct {
+		name      string
+		userAgent string
+		enabled   bool
+		wantHint  bool
+	}{
+		{name: "enabled chromium", userAgent: chrome, enabled: true, wantHint: true},
+		{name: "disabled chromium", userAgent: chrome, enabled: false, wantHint: false},
+		{name: "enabled firefox", userAgent: firefox, enabled: true, wantHint: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			request := httptest.NewRequest(http.MethodPost, "https://console.x.ai/v1/responses", nil)
+			lease := &infraegress.Lease{NodeID: 1, UserAgent: test.userAgent, ClientHintsEnabled: test.enabled}
+
+			// When
+			applyHeaders(request, "test-sso", "fallback", lease)
+
+			// Then
+			if got := request.Header.Get("Sec-Ch-Ua"); (got != "") != test.wantHint {
+				t.Fatalf("Sec-Ch-Ua = %q, want hint present = %v", got, test.wantHint)
+			}
+		})
+	}
+}
+
 func TestAdapterPreservesConversationRateLimitStatusAndProtocol(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "text/plain")

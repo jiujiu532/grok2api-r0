@@ -119,6 +119,39 @@ func TestSyncQuotaStopsAfterFirstUnauthorizedMode(t *testing.T) {
 	}
 }
 
+func TestSyncQuotaModeRetriesOnceAfterForbiddenWithManualStatsig(t *testing.T) {
+	// Given
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			writer.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]int{"windowSizeSeconds": 7200, "remainingQueries": 4, "totalQueries": 7})
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewAdapter(Config{BaseURL: server.URL, QuotaTimeoutSeconds: 5, StatsigMode: "manual"}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+
+	// When
+	window, err := adapter.SyncQuotaMode(context.Background(), account.Credential{ID: 4, Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, EncryptedAccessToken: token}, "auto")
+
+	// Then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 || window.Total != 7 || window.Remaining != 4 {
+		t.Fatalf("calls=%d window=%#v", calls.Load(), window)
+	}
+}
+
 func TestInferWebTierFromUpstreamQuota(t *testing.T) {
 	tests := []struct {
 		name    string

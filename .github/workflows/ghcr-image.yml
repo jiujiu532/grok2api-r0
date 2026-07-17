@@ -40,6 +40,9 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
+      - name: Verify release contract
+        run: make check-release-contract
+
       - name: Verify Swagger document
         run: |
           make swagger
@@ -136,14 +139,18 @@ jobs:
           image_name=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           echo "name=ghcr.io/$image_name" >> "$GITHUB_OUTPUT"
 
+      - name: Normalize release tag
+        id: version
+        shell: bash
+        run: echo "tag=$(bash scripts/image-tag.sh < VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch,suffix=-${{ matrix.arch }}
-            type=ref,event=tag,suffix=-${{ matrix.arch }}
+            type=raw,value=${{ steps.version.outputs.tag }}-${{ matrix.arch }}
             type=raw,value=latest-${{ matrix.arch }},enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Login to GHCR
@@ -178,6 +185,9 @@ jobs:
       packages: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -188,14 +198,18 @@ jobs:
           image_name=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           echo "name=ghcr.io/$image_name" >> "$GITHUB_OUTPUT"
 
+      - name: Normalize release tag
+        id: version
+        shell: bash
+        run: echo "tag=$(bash scripts/image-tag.sh < VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
+            type=raw,value=${{ steps.version.outputs.tag }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Login to GHCR

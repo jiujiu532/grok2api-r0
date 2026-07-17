@@ -43,4 +43,22 @@ foreach ($rel in @("backend\docs\docs.go", "backend\docs\swagger.yaml", "backend
   }
 }
 
+$composePath = Join-Path $root "docker-compose.yml"
+$composeLines = Get-Content -LiteralPath $composePath
+$composeMarker = "GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:"
+$composeUpdated = $false
+for ($index = 0; $index -lt $composeLines.Count; $index++) {
+  if (-not $composeLines[$index].Contains($composeMarker)) { continue }
+  $composeLines[$index] = '    image: "${GROK2API_IMAGE:-ghcr.io/jiujiu532/grok2api-r0:' + $version + '}"'
+  $composeUpdated = $true
+  break
+}
+if (-not $composeUpdated) { throw "docker-compose.yml default image was not updated" }
+[System.IO.File]::WriteAllText(
+  $composePath,
+  (($composeLines -join "`n") + "`n"),
+  [System.Text.UTF8Encoding]::new($false)
+)
+Write-Host "docker-compose.yml -> $version"
+
 Write-Host "OK: app version = $version (source: VERSION)"

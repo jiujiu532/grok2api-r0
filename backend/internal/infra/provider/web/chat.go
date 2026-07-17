@@ -169,20 +169,18 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 		previous = currentPrevious
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
-			if upstream.StatusCode == http.StatusForbidden {
-				// 先冷却当前出口并销毁连接，再尝试换节点 / 刷新 Statsig。
-				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
-				if attempt == 0 {
-					a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
-					a.releaseStatsigRetry(upstream, lease)
-					continue
-				}
+			if upstream.StatusCode == http.StatusForbidden && attempt == 0 {
+				// 冷却当前出口并销毁连接，再尝试换节点 / 刷新 Statsig。
+				a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
+				a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
+				a.releaseStatsigRetry(upstream, lease)
+				continue
 			}
 			return &provider.Response{
 				StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
 				UpstreamURL: responseUpstreamURL(upstream),
 				Body: &releaseBody{ReadCloser: upstream.Body, release: func() {
-					a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+					a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, upstream.StatusCode, nil)
 					lease.Release()
 				}},
 			}, nil
@@ -254,7 +252,7 @@ func (a *Adapter) releaseStatsigRetry(upstream *http.Response, lease *infraegres
 
 func (a *Adapter) feedbackAntiBot(ctx context.Context, lease *infraegress.Lease, statsigTarget string) {
 	a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+	a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
 }
 
 func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {

@@ -378,13 +378,13 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(upstream.Body, 1<<20))
 			_ = upstream.Body.Close()
-			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
-					lease.Release()
-					continue
-				}
+			if upstream.StatusCode == http.StatusForbidden && attempt == 0 {
+				a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
+				a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
+				lease.Release()
+				continue
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+			a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, upstream.StatusCode, nil)
 			lease.Release()
 			return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
 		}
@@ -413,12 +413,14 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			status := 0
 			if errors.Is(consumeErr, errWebAntiBot) {
 				status = http.StatusForbidden
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 {
+					a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
+					a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
 					lease.Release()
 					continue
 				}
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, status, consumeErr)
+			a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, status, consumeErr)
 			lease.Release()
 			if status == http.StatusForbidden {
 				response := antiBotProviderResponse()
@@ -428,7 +430,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			return "", consumeErr
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusOK, nil)
 		lease.Release()
 		if firstImage != "" {
 			return firstImage, nil
@@ -1002,12 +1004,14 @@ func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *eg
 			return nil, err
 		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 {
+				a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
+				a.invalidateSignedStatsig(http.MethodPost, endpoint)
 				_ = response.Body.Close()
 				cancel()
 				continue
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+			a.egress.FeedbackForScope(context.WithoutCancel(ctx), lease.Scope, lease.NodeID, http.StatusForbidden, nil)
 		}
 		response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
 		return response, nil

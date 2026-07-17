@@ -386,6 +386,32 @@ func TestEgressNodeSnapshotAvoidsRepeatedRepositoryReads(t *testing.T) {
 	}
 }
 
+func TestUpdateClearancePolicy_invalidatesWebAndConsoleClientCaches_whenIdentityChanges(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{}, nil)
+	manager.clients = map[clientCacheKey]cachedClient{
+		{nodeID: 1, scope: domain.ScopeWeb, fingerprint: "web"}:         {},
+		{nodeID: 2, scope: domain.ScopeConsole, fingerprint: "console"}: {},
+		{nodeID: 3, scope: domain.ScopeBuild, fingerprint: "build"}:     {},
+	}
+	manager.nodes = map[domain.Scope]cachedNodeSnapshot{
+		domain.ScopeWeb:     {},
+		domain.ScopeConsole: {},
+		domain.ScopeBuild:   {},
+	}
+	manager.UpdateClearancePolicy(ClearancePolicy{Mode: ClearanceModeManual, CFCookies: "cf_clearance=new", UserAgent: "new agent"})
+
+	// Then
+	if len(manager.clients) != 1 {
+		t.Fatalf("cached clients = %d, want Build-only cache", len(manager.clients))
+	}
+	if _, ok := manager.clients[clientCacheKey{nodeID: 3, scope: domain.ScopeBuild, fingerprint: "build"}]; !ok {
+		t.Fatal("clearance policy update invalidated unrelated Build cache")
+	}
+	if len(manager.nodes) != 1 {
+		t.Fatalf("cached snapshots = %d, want Build-only cache", len(manager.nodes))
+	}
+}
+
 type egressRepositoryTestStub struct{ nodes []domain.Node }
 
 func managerHasClientForNode(manager *Manager, nodeID uint64) bool {

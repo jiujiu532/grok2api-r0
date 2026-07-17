@@ -139,7 +139,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/jiujiu532/grok2api-r0/main/s
 
 #### 安装完成后你还需要
 
-1. 打开管理端，用安装时输出的账号密码登录  
+1. 打开管理端，用受限凭据文件中的账号密码登录
 2. **上游账号** 导入 Grok Web / Build / Console  
 3. **客户端密钥** 创建 `g2a_` API Key  
 4. 建议改密，并从 `config.yaml` 删除 `bootstrapAdmin`  
@@ -190,7 +190,7 @@ bootstrapAdmin:
 #### 3. 启动（可用本仓库 CI 镜像）
 
 ```bash
-export GROK2API_IMAGE=ghcr.io/jiujiu532/grok2api-r0:latest
+export GROK2API_IMAGE=ghcr.io/jiujiu532/grok2api-r0:3.0.2
 export GROK2API_PORT=8000
 docker compose pull
 docker compose up -d
@@ -355,25 +355,25 @@ curl http://127.0.0.1:8000/v1/responses \
 
 ## 版本管理
 
-**只改一个文件：[`VERSION`](./VERSION)**（语义化版本，无 `v` 前缀，如 `3.0.0`）。
+**唯一手改版本源：[`VERSION`](./VERSION)**（可带 `v` 前缀，如当前 `v3.0.2`）。修改后执行 `make sync-version`，将展示字段与 Compose 默认镜像同步；镜像标签会去除前缀，发布为 `3.0.2`。
 
-其余位置会自动跟上来，不必手改多处：
+同步后的消费者：
 
 | 消费者 | 如何自动同步 |
 | :-- | :-- |
 | Go（`go run` / 测试） | 启动时读取根目录 `VERSION` |
-| Go 发布二进制 / Docker | 构建参数 / `-ldflags` 注入 `VERSION` |
-| 管理 API | `GET /api/admin/v1/system` → `version` |
-| 前端页脚 | Vite 构建时读根目录 `VERSION` |
-| `package.json` / Swagger 展示字段 | `make sync-version` 或 `scripts/sync-version.sh` |
-| GHCR 标签 | CI 读 `VERSION` → `3.0.0` / `latest` / `sha-…` |
-| 安装脚本默认镜像 | `ghcr.io/jiujiu532/grok2api-r0:$(cat VERSION)` |
+| Go 发布二进制 / Docker | Docker 镜像携带根目录 `VERSION`，运行时读取 |
+| 管理 API | `GET /api/admin/v1/system/version` |
+| 前端页脚 | 通过管理 API 读取当前运行版本 |
+| `package.json` / Swagger / Compose 默认镜像 | `make sync-version` 或 `scripts/sync-version.sh` |
+| GHCR 标签 | CI 读 `VERSION` 并规范化为 `3.0.0`；仅 `main` 额外发布 `latest` |
+| 安装脚本默认镜像 | 本地仓库执行时使用规范化的 `VERSION`；远程一键安装使用 `latest` |
 
 发版：
 
 ```bash
-echo 3.0.1 > VERSION
-make sync-version          # 把 package.json / swagger 展示字段对齐
+echo v3.0.1 > VERSION
+make sync-version          # 把 package.json / Swagger / Compose 默认镜像对齐
 git add -A && git commit -m "chore: release 3.0.1"
 git tag v3.0.1 && git push && git push --tags
 ```
@@ -398,7 +398,7 @@ pnpm lint
 pnpm build
 ```
 
-CI：push 到 `main`/`master` 或打 `v*.*.*` 时读取 `VERSION` 构建多架构镜像。仅改 `**.md` / `scripts/**` 等不进镜像的路径不会触发构建。
+CI：push 到 `main` 或打 `v*.*.*` 时读取 `VERSION` 构建多架构镜像。所有发布都会推送规范化版本标签；仅 `main` 同时更新 `latest`。
 
 ## 进一步阅读
 

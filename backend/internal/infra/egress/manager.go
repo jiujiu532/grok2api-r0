@@ -112,8 +112,16 @@ func (m *Manager) UpdateClearancePolicy(policy ClearancePolicy) {
 		normalized.UserAgent = DefaultUserAgent
 	}
 	m.mu.Lock()
+	previous := m.policy
 	m.policy = normalized
+	if clearanceClientIdentityChanged(previous, normalized) {
+		m.invalidateClearanceCachesLocked()
+	}
 	m.mu.Unlock()
+}
+
+func clearanceClientIdentityChanged(previous, next ClearancePolicy) bool {
+	return previous.Mode != next.Mode || previous.CFCookies != next.CFCookies || previous.UserAgent != next.UserAgent
 }
 
 func (m *Manager) clearancePolicy() ClearancePolicy {
@@ -339,6 +347,34 @@ func (m *Manager) invalidateNodes(scope domain.Scope) {
 	m.mu.Lock()
 	delete(m.nodes, scope)
 	m.mu.Unlock()
+}
+
+// InvalidateNodeCache 丢弃一个已更新出口节点的快照和连接池。
+func (m *Manager) InvalidateNodeCache(scope domain.Scope, nodeID uint64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.nodes, scope)
+	m.invalidateClientLocked(nodeID)
+	m.mu.Unlock()
+}
+
+func (m *Manager) invalidateClearanceCachesLocked() {
+	for key, cached := range m.clients {
+		if key.scope == domain.ScopeBuild {
+			continue
+		}
+		if cached.client != nil {
+			cached.client.CloseIdleConnections()
+		}
+		delete(m.clients, key)
+	}
+	for scope := range m.nodes {
+		if scope != domain.ScopeBuild {
+			delete(m.nodes, scope)
+		}
+	}
 }
 
 func fallbackScopes(scope domain.Scope) []domain.Scope {

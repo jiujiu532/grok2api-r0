@@ -289,6 +289,9 @@ func fetchStatsigMetaContent(ctx context.Context, baseURL, token string, lease *
 	request.Header.Set("Upgrade-Insecure-Requests", "1")
 	request.Header.Set("User-Agent", lease.UserAgent)
 	request.Header.Set("Cookie", infraegress.BuildSSOCookie(token, lease.CFCookies))
+	if lease.ClientHintsEnabled {
+		infraegress.ApplyClientHints(request.Header, lease.UserAgent)
+	}
 	response, err := lease.Do(request)
 	if err != nil {
 		return "", err

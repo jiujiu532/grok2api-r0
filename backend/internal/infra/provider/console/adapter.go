@@ -300,6 +300,9 @@ func applyHeaders(request *http.Request, token, configuredUserAgent string, leas
 	request.Header.Set("Priority", "u=1, i")
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("x-cluster", "https://us-east-1.api.x.ai")
+	if lease.ClientHintsEnabled {
+		infraegress.ApplyClientHints(request.Header, userAgent)
+	}
 }
 
 func normalizeRateLimitResponse(response *http.Response) (bool, *provider.RateLimitMetadata, error) {

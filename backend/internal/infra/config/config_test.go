@@ -220,6 +220,39 @@ func TestValidateStatsigModes(t *testing.T) {
 	}
 }
 
+func TestValidateFlareSolverrEndpointPolicy(t *testing.T) {
+	base := defaultConfig()
+	base.Secrets.JWTSecret = "12345678901234567890123456789012"
+	base.Secrets.CredentialEncryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	base.Clearance.Mode = "flaresolverr"
+
+	tests := map[string]struct {
+		endpoint string
+		wantErr  bool
+	}{
+		"accepts Docker service":   {endpoint: "http://flaresolverr:8191", wantErr: false},
+		"rejects public plaintext": {endpoint: "http://flaresolverr.example.com:8191", wantErr: true},
+		"rejects credentials":      {endpoint: "http://user:password@flaresolverr:8191", wantErr: true},
+		"rejects query":            {endpoint: "http://flaresolverr:8191?token=value", wantErr: true},
+		"rejects fragment":         {endpoint: "http://flaresolverr:8191#internal", wantErr: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Given
+			cfg := base
+			cfg.Clearance.FlareSolverrURL = test.endpoint
+
+			// When
+			err := cfg.Validate()
+
+			// Then
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Validate(%q) error = %v, wantErr %v", test.endpoint, err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateInfrastructureDrivers(t *testing.T) {
 	base := defaultConfig()
 	base.Secrets.JWTSecret = "12345678901234567890123456789012"
