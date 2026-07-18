@@ -32,8 +32,8 @@ foreach ($rel in @("backend\docs\docs.go", "backend\docs\swagger.yaml", "backend
   if ($rel -like "*.go") {
     $next = [regex]::Replace($next, 'Version:\s+"[^"]*"', "Version:          `"$version`"")
   } elseif ($rel -like "*.yaml") {
-    # 与 swag 一致：version: 3.0.0（无引号）
-    $next = [regex]::Replace($next, '(?m)^version:\s*.*$', "version: $version")
+    # 与 swag 一致：缩进后的 version: 3.0.0（无引号）
+    $next = [regex]::Replace($next, '(?m)^(\s*)version:\s*.*$', ('${1}version: ' + $version), 1)
   } elseif ($rel -like "*.json") {
     $next = [regex]::Replace($next, '"version":\s*"[^"]*"', "`"version`": `"$version`"", 1)
   }

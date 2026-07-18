@@ -17,6 +17,8 @@ grep -Fq 'bash scripts/image-tag.sh < VERSION' "$root/.github/workflows/ghcr-ima
 grep -Fq "grok2api-r0:${expected_tag}" "$root/docker-compose.yml" || fail "compose must default to the normalized release tag"
 grep -Fq "\"version\": \"${expected_tag}\"" "$root/frontend/package.json" || fail "frontend package version must be synchronized"
 grep -Fq "// @version ${expected_tag}" "$root/backend/cmd/grok2api/main.go" || fail "Swagger annotation must be synchronized"
+grep -Eq "^[[:space:]]*version:[[:space:]]*${expected_tag}\$" "$root/backend/docs/swagger.yaml" || fail "swagger.yaml version must be synchronized"
+grep -Fq "\"version\": \"${expected_tag}\"" "$root/backend/docs/swagger.json" || fail "swagger.json version must be synchronized"
 grep -Fq 'type=raw,value=${{ steps.version.outputs.tag }}-${{ matrix.arch }}' "$root/.github/workflows/ghcr-image.yml" || fail "workflow must publish release architecture tags"
 grep -Fq 'type=raw,value=${{ steps.version.outputs.tag }}' "$root/.github/workflows/ghcr-image.yml" || fail "workflow must publish the release manifest tag"
 grep -Fq "type=raw,value=latest,enable=\${{ github.ref == 'refs/heads/main' }}" "$root/.github/workflows/ghcr-image.yml" || fail "latest must be limited to main"

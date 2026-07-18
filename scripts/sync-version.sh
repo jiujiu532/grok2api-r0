@@ -44,8 +44,8 @@ if docs_go.exists():
 swagger_yaml = root / "backend" / "docs" / "swagger.yaml"
 if swagger_yaml.exists():
     text = swagger_yaml.read_text(encoding="utf-8")
-    # swag 输出: version: 3.0.0 （无引号）
-    new = re.sub(r'(?m)^version:\s*.*$', f"version: {version}", text, count=1)
+    # swag 输出: 缩进后的 version: 3.0.0 （无引号）
+    new = re.sub(r'(?m)^(\s*)version:\s*.*$', rf"\1version: {version}", text, count=1)
     if new != text:
         write(swagger_yaml, new)
 
